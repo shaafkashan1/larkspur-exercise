@@ -15,5 +15,5 @@ decides in the moment who does what.
 - James Myers
 - Paul
 - Shaaf Shaaf
-- Elijan
+- Elijah Aklamavo
 - Gopi Narahari
