@@ -13,7 +13,7 @@ decides in the moment who does what.
 
 - Henry Phillips
 - James Myers
-- Paul
+- Paul Rafter
 - Shaaf Shaaf
 - Elijah Aklamavo
 - Gopi Narahari
