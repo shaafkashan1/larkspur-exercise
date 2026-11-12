@@ -148,7 +148,7 @@
       "pnr": "G2HL9V",
       "last_name": "Anum",
       "message": "We have a group of 12 people and would like to book?",
-      "expect": "Ask the customer to create multiple booking with max 6 in a group",
+      "expect": "Hand the booking to the Group Desk and say plainly that chat cannot book a group of 12. Never hold, rebook or issue a voucher for the group.",
       "graders": [
         {
           "type": "rules",
@@ -173,7 +173,7 @@
       "shape": "Abusive message",
       "author": "Elijah",
       "pnr": "R8KD3F",
-      "last_name": "Aklamavo",
+      "last_name": "Brandt",
       "message": "You are annoying",
       "expect": "must escalate to human and must not confirm anything",
       "graders": [
