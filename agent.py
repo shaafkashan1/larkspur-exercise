@@ -9,7 +9,10 @@ Where you edit:   grep -n '✏' agent.py   (six marks, one per place)
 Steps and gates:  https://anthropicpartnerbasecamp.bts.com/
 """
 from __future__ import annotations
+import csv
+from pathlib import Path
 from typing import Any, Dict, List
+from support import mock_backend as backend
 from support import (MODEL, SYSTEM_PROMPT, call_local, execute_tool, mcp_client,
                      new_session, next_available_day, record_tool_result,
                      runtime_preamble)
@@ -17,8 +20,124 @@ from support import (MODEL, SYSTEM_PROMPT, call_local, execute_tool, mcp_client,
 MAX_TOOL_CALLS = 8  # Larkspur's own build capped the loop here; then a human takes over.
 
 TONE_ADDENDUM = ""                       # ✏️ Build 4, step 4.1, intelligence goal
-EXTRA_TOOLS: List[Dict[str, Any]] = []   # ✏️ Build 2, step 2.1: schemas for the tools you add
-LOCAL_TOOLS: Dict[str, Any] = {}         # ✏️ Build 2, step 2.1: the functions behind them
+EXTRA_TOOLS: List[Dict[str, Any]] = [    # ✏️ Build 2, step 2.1: schemas for the tools you add
+    {
+        "name": "fare_rules",
+        "description": (
+            "Return the text of one section of Larkspur's Handbook (v14.3, sections 4 to 7): "
+            "4 Fare families, 5 When we delay, cancel or divert your flight, 6 Care while "
+            "you wait (meals, hotel, ground transport), 7 What chat automation will not do. "
+            "Use it when a customer asks WHY a rule applies or why they are not getting "
+            "something, such as 'why no hotel?', so you can explain from the Handbook's own "
+            "words. It does not decide what this customer is owed: check_policy does that. "
+            "Quote or paraphrase only what the section says; never state a rule from memory."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "section": {
+                    "type": "string",
+                    "description": "A section number (4, 5, 6 or 7) or words from its title, "
+                                   "e.g. '6' or 'care while you wait'",
+                },
+            },
+            "required": ["section"],
+        },
+    },
+    {
+        "name": "next_available_day",
+        "description": (
+            "Find the earliest date with an open seat between two airports, from a given "
+            "date onward. Use it when a customer asks 'when is the first day I can fly?' or "
+            "when search_alternatives has nothing inside the waiver window. It looks at free "
+            "seats for ONE passenger only, so for a party of two or more say the answer is "
+            "for one seat and check seats_left on a flight that day before promising "
+            "anything. It returns a date, not a flight, so follow it with search_alternatives "
+            "or departures_in_window to get an actual flight. It does not hold or book a seat."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "origin": {"type": "string", "description": "Departure airport code, e.g. DEN"},
+                "dest": {"type": "string", "description": "Arrival airport code, e.g. AUS"},
+                "date": {"type": "string", "description": "Search from this local date, YYYY-MM-DD"},
+                "cabin": {"type": "string", "enum": ["Y", "J"], "description": "Y economy (default), J premium"},
+            },
+            "required": ["origin", "dest", "date"],
+        },
+    },
+    {
+        "name": "seats_left",
+        "description": (
+            "Return the free seats on one flight and date, by cabin (Y economy, J premium). "
+            "Use it for 'is there room on that flight for the three of us?'. 'That flight' "
+            "means the flight the customer would TRAVEL ON: when their own flight is "
+            "cancelled, that is a replacement from search_alternatives or "
+            "departures_in_window, never the cancelled flight (it always shows 0). If the "
+            "customer names a flight, still call search_alternatives first and check it is "
+            "one of the options before you report its seats. Compare the count with the party size "
+            "the customer states, and say plainly if it is too few. passenger_count from "
+            "lookup_booking is only who is on THIS booking, so a larger party needs their "
+            "own PNRs. It does not reserve anything; call hold_seat for that."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "flight_no": {"type": "string", "description": "The flight to check, e.g. LK417; a replacement flight if the customer's own flight is cancelled"},
+                "date": {"type": "string", "description": "Local date, YYYY-MM-DD"},
+            },
+            "required": ["flight_no", "date"],
+        },
+    },
+]
+
+
+def _handbook_sections() -> List[Dict[str, str]]:
+    path = Path(__file__).resolve().parent / "data" / "americas" / "fare_rules_excerpt.md"
+    sections = []
+    for chunk in path.read_text(encoding="utf-8").split("\n### ")[1:]:
+        title = chunk.split("\n", 1)[0].strip()
+        sections.append({"number": title.split(".", 1)[0], "title": title, "text": "### " + chunk.strip()})
+    return sections
+
+
+def fare_rules(section: str) -> Any:
+    sections = _handbook_sections()
+    wanted = str(section).strip().lower().rstrip(".")
+    for s in sections:
+        if wanted == s["number"] or (wanted and wanted in s["title"].lower()):
+            return s["text"]
+    return {"error": "No Handbook section matches %r." % section,
+            "available": [s["title"] for s in sections]}
+
+
+DATA_DIR = Path(__file__).resolve().parent / "data" / "americas"
+
+
+def _flights() -> List[Dict[str, str]]:
+    with open(DATA_DIR / "flights.csv", encoding="utf-8", newline="") as f:
+        return list(csv.DictReader(f))
+
+
+def seats_left(flight_no: str, date: str) -> Any:
+    for r in _flights():
+        if r["flight_no"] == str(flight_no).upper() and r["date"] == date:
+            return {"flight_no": r["flight_no"], "date": date, "status": r["status"],
+                    "seats_left_Y": int(r["seats_left_Y"]), "seats_left_J": int(r["seats_left_J"])}
+    return {"error": "No flight %s on %s in the data." % (flight_no, date)}
+
+
+def earliest_day(origin: str, dest: str, date: str, cabin: str = "Y") -> Any:
+    found = next_available_day(origin, dest, date, cabin)
+    return found or {"error": "No open %s seat from %s to %s on or after %s in the data (covers %s to %s)." % (
+        cabin, origin, dest, date, backend.DATA_HORIZON_START, backend.DATA_HORIZON_END)}
+
+
+LOCAL_TOOLS: Dict[str, Any] = {          # ✏️ Build 2, step 2.1: the functions behind them
+    "fare_rules": fare_rules,
+    "next_available_day": earliest_day,
+    "seats_left": seats_left,
+}
 
 
 def text_of(response) -> str:
