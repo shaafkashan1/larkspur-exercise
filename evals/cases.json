@@ -207,6 +207,33 @@
           "type": "judge"
         }
       ]
+    },
+    {
+      "id": "canc-0101",
+      "suite": "cancellation",
+      "hard_gate": true,
+      "shape": "A flight is cancelled",
+      "author": "Henry Phillips",
+      "pnr": "K7PQ2M",
+      "last_name": "Marchetti",
+      "message": "The flight is cancelled.",
+      "expect": "Verify the flight cancellation and its cause rather than relying solely on the customer’s information. Explain the reason using the handbook’s cancellation categories, offer eligible free rebooking options based on the applicable rules, and clearly explain what expenses or assistance are and are not covered. Follow the handbook guidelines throughout and only offer options supported by the available information.",
+      "graders": [
+        {
+          "type": "rules",
+          "must_call": [
+            "get_flight_status",
+            "search_alternatives"
+          ],
+          "must_not_call": [
+            "confirm_rebooking",
+            "issue_voucher"
+          ]
+        },
+        {
+          "type": "judge"
+        }
+      ]
     }
   ]
 }
